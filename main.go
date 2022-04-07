@@ -36,45 +36,68 @@ func (fi fileInfo) Path() string {
 }
 
 type SearchData struct {
-	sync.Mutex
-	depth int
-	current int
-	lastSignalType os.Signal
-	waitCh *chan struct{}
+	mu            sync.RWMutex
+	maxDepth      int
+	dirToDepthMap map[string]int
+	waitCh        *chan struct{}
+}
+
+func (data *SearchData) IncreaseMaxDepth() {
+	data.mu.Lock()
+	data.maxDepth += 2
+	data.mu.Unlock()
+}
+
+func (data *SearchData) SaveCurrentDir(dir string, depth int) {
+	data.mu.Lock()
+	data.dirToDepthMap[dir] = depth
+	data.mu.Unlock()
+}
+
+func (data *SearchData) RemoveCurrentDir(dir string) {
+	data.mu.Lock()
+	delete(data.dirToDepthMap, dir)
+	data.mu.Unlock()
+}
+
+func (data *SearchData) GetCurrentDir() string {
+	data.mu.RLock()
+	defer data.mu.RUnlock()
+	if len(data.dirToDepthMap) != 0 {
+		for key := range data.dirToDepthMap {
+			return key
+		}
+	}
+	return ""
+}
+
+func (data *SearchData) GetCurrentDepth(dir string) int {
+	data.mu.Lock()
+	defer data.mu.Unlock()
+	return data.dirToDepthMap[dir]
 }
 
 // Ограничить глубину поиска заданым числом
-func ListDirectory(ctx context.Context, dir string, data *SearchData) ([]FileInfo, error) {
+func (data *SearchData) ListDirectory(ctx context.Context, dir string, depth int) ([]FileInfo, error) {
 	*data.waitCh <- struct{}{}
 	select {
 	case <-ctx.Done():
 		return nil, nil
 	default:
-		switch data.lastSignalType {
-		// По SIGINT увеличить глубину поиска на +2
-		case syscall.SIGINT:
-			data.Lock()
-			data.depth+=2
-			data.Unlock()
-		// По SIGHUP вывести текущую директорию и текущую глубину поиска
-		case syscall.SIGHUP:
-			fmt.Printf("\tDir: %s\t\t Depth: %s\n", dir, data.depth)
-
-		}
-		time.Sleep(time.Second * 10)
+		time.Sleep(time.Second * 2)
 		var result []FileInfo
+		data.SaveCurrentDir(dir, depth)
+		defer data.RemoveCurrentDir(dir)
+		depth++
 		res, err := os.ReadDir(dir)
 		if err != nil {
 			return nil, err
 		}
 		for _, entry := range res {
-			data.current = 0
 			path := filepath.Join(dir, entry.Name())
 			if entry.IsDir() {
-				fmt.Println(data.current, data.depth, path)
-				if data.current < data.depth {
-					data.current++
-					child, err := ListDirectory(ctx, path, data) // Дополнительно: вынести в горутину
+				if depth <= data.maxDepth {
+					child, err := data.ListDirectory(ctx, path, depth) // Дополнительно: вынести в горутину
 					if err != nil {
 						return nil, err
 					}
@@ -92,12 +115,12 @@ func ListDirectory(ctx context.Context, dir string, data *SearchData) ([]FileInf
 	}
 }
 
-func FindFiles(ctx context.Context, ext string, data *SearchData) (FileList, error) {
+func (data *SearchData) FindFiles(ctx context.Context, ext string) (FileList, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	files, err := ListDirectory(ctx, wd, data)
+	files, err := data.ListDirectory(ctx, wd, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -122,10 +145,10 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	waitCh := make(chan struct{})
-	data := SearchData{depth: 2, waitCh: &waitCh}
+	data := SearchData{maxDepth: 2, waitCh: &waitCh, dirToDepthMap: make(map[string]int)}
 	go func() {
 		defer close(waitCh)
-		res, err := FindFiles(ctx, wantExt, &data)
+		res, err := data.FindFiles(ctx, wantExt)
 		if err != nil {
 			log.Printf("Error on search: %v\n", err)
 			os.Exit(1)
@@ -137,16 +160,17 @@ func main() {
 	go func() {
 		signalType := <-sigCh
 
-		data.Lock()
-		data.lastSignalType = signalType
-		data.Unlock()
-
 		switch signalType {
-		case syscall.SIGINT:
+		// По SIGTERM увеличить глубину поиска на +2
+		case syscall.SIGTERM:
 			log.Println("Search depth will be increased (+2)")
-		// Обработать сигнал SIGHUP
+			data.IncreaseMaxDepth()
+		// По SIGHUP вывести текущую директорию и текущую глубину поиска
 		case syscall.SIGHUP:
 			log.Println("You will see current directory and search depth")
+
+			currentDir := data.GetCurrentDir()
+			fmt.Printf("\tDir: %s\t\t Depth: %d\n", currentDir, data.GetCurrentDepth(currentDir))
 		default:
 			log.Println("Signal received, terminate...")
 			cancel()
