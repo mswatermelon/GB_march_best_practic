@@ -31,6 +31,11 @@ type fileInfo struct {
 	path string
 }
 
+type DirData struct {
+	files []FileInfo
+	err   error
+}
+
 func (fi fileInfo) Path() string {
 	return fi.path
 }
@@ -39,7 +44,10 @@ type SearchData struct {
 	mu            sync.RWMutex
 	maxDepth      int
 	dirToDepthMap map[string]int
-	waitCh        *chan struct{}
+	wg            sync.WaitGroup
+	wantExt       string
+	dirDataCh     chan DirData
+	result        chan []FileInfo
 }
 
 func (data *SearchData) IncreaseMaxDepth() {
@@ -78,62 +86,61 @@ func (data *SearchData) GetCurrentDepth(dir string) int {
 }
 
 // Ограничить глубину поиска заданым числом
-func (data *SearchData) ListDirectory(ctx context.Context, dir string, depth int) ([]FileInfo, error) {
-	*data.waitCh <- struct{}{}
+func (data *SearchData) ListDirectory(ctx context.Context, dir string, depth int) {
+	defer data.wg.Done()
 	select {
 	case <-ctx.Done():
-		return nil, nil
+		data.dirDataCh <- DirData{
+			files: nil,
+			err:   nil,
+		}
+		return
 	default:
-		time.Sleep(time.Second * 2)
-		var result []FileInfo
+		time.Sleep(time.Second * 1)
 		data.SaveCurrentDir(dir, depth)
 		defer data.RemoveCurrentDir(dir)
 		depth++
 		res, err := os.ReadDir(dir)
 		if err != nil {
-			return nil, err
+			data.dirDataCh <- DirData{
+				files: nil,
+				err:   err,
+			}
+			return
 		}
 		for _, entry := range res {
 			path := filepath.Join(dir, entry.Name())
-			if entry.IsDir() {
-				if depth <= data.maxDepth {
-					child, err := data.ListDirectory(ctx, path, depth) // Дополнительно: вынести в горутину
-					if err != nil {
-						return nil, err
-					}
-					result = append(result, child...)
-				}
-			} else {
+			if filepath.Ext(entry.Name()) == data.wantExt {
 				info, err := entry.Info()
 				if err != nil {
-					return nil, err
+					data.dirDataCh <- DirData{
+						files: nil,
+						err:   err,
+					}
 				}
+				result := make([]FileInfo, 0)
 				result = append(result, fileInfo{info, path})
+				data.dirDataCh <- DirData{
+					files: result,
+					err:   nil,
+				}
+			} else if entry.IsDir() && depth <= data.maxDepth {
+				data.wg.Add(1)
+				go func() {
+					data.ListDirectory(ctx, path, depth)
+				}()
 			}
 		}
-		return result, nil
 	}
 }
 
-func (data *SearchData) FindFiles(ctx context.Context, ext string) (FileList, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return nil, err
+func (data *SearchData) WriteDirectory() {
+	result := make([]FileInfo, 0)
+	for n := range data.dirDataCh {
+		result = append(result, n.files...)
 	}
-	files, err := data.ListDirectory(ctx, wd, 0)
-	if err != nil {
-		return nil, err
-	}
-	fl := make(FileList, len(files))
-	for _, file := range files {
-		if filepath.Ext(file.Name()) == ext {
-			fl[file.Name()] = TargetFile{
-				Name: file.Name(),
-				Path: file.Path(),
-			}
-		}
-	}
-	return fl, nil
+
+	data.result <- result
 }
 
 func main() {
@@ -144,19 +151,27 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-	waitCh := make(chan struct{})
-	data := SearchData{maxDepth: 2, waitCh: &waitCh, dirToDepthMap: make(map[string]int)}
+	data := SearchData{
+		maxDepth:      2,
+		dirToDepthMap: make(map[string]int),
+		dirDataCh:     make(chan DirData),
+		wantExt:       wantExt,
+		result:        make(chan []FileInfo, 1),
+	}
+
+	data.wg.Add(1)
+
 	go func() {
-		defer close(waitCh)
-		res, err := data.FindFiles(ctx, wantExt)
-		if err != nil {
-			log.Printf("Error on search: %v\n", err)
-			os.Exit(1)
-		}
-		for _, f := range res {
-			fmt.Printf("\tName: %s\t\t Path: %s\n", f.Name, f.Path)
-		}
+		wd, _ := os.Getwd()
+		data.ListDirectory(ctx, wd, 0)
+		data.wg.Wait()
+		close(data.dirDataCh)
 	}()
+
+	go func() {
+		data.WriteDirectory()
+	}()
+
 	go func() {
 		signalType := <-sigCh
 
@@ -174,12 +189,12 @@ func main() {
 		default:
 			log.Println("Signal received, terminate...")
 			cancel()
+			os.Exit(0)
 		}
 	}()
-	// Дополнительно: Ожидание всех горутин перед завершением
-	for range waitCh {
-		<-waitCh
+	res := <-data.result
+	for _, f := range res {
+		fmt.Printf("\tName: %s\t\t Path: %s\n", f.Name(), f.Path())
 	}
-	cancel()
 	log.Println("Done")
 }
