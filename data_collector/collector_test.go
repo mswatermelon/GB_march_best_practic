@@ -180,7 +180,10 @@ func TestCollectData(t *testing.T) {
 	res := searchData.CollectData(ctx)
 
 	checkSlice := []PathData{
-		{name: "main.go", path: "C:\\Users\\V.Aristarkhova\\GolandProjects\\GB_march_best_practic\\data_collector\\main.go"},
+		{
+			name: "main.go",
+			path: "C:\\Users\\V.Aristarkhova\\GolandProjects\\GB_march_best_practic\\data_collector\\main.go",
+		},
 	}
 	for i, f := range res {
 		assert.Equal(t, checkSlice[i].name, f.Name())
