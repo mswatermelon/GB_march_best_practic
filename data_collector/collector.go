@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
+	iofs "io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -13,15 +14,15 @@ import (
 )
 
 type DataCollector interface {
-	CollectData(ctx context.Context)  []fileDir.FileInfo
+	CollectData(ctx context.Context) []fileDir.FileInfo
 }
 
 func NewCollector(
-	maxDepth      int,
-	wantExt       string,
+	maxDepth int,
+	wantExt string,
 	dirToDepthMap map[string]int,
 	dirDataCh chan fileDir.DirData,
-	result    chan []fileDir.FileInfo,
+	result chan []fileDir.FileInfo,
 ) DataCollector {
 	return &SearchData{
 		MaxDepth:      maxDepth,
@@ -29,6 +30,7 @@ func NewCollector(
 		DirDataCh:     dirDataCh,
 		WantExt:       wantExt,
 		Result:        result,
+		ReadDir:       os.ReadDir,
 	}
 }
 
@@ -38,8 +40,9 @@ type SearchData struct {
 	DirToDepthMap map[string]int
 	Wg            sync.WaitGroup
 	WantExt       string
-	DirDataCh chan fileDir.DirData
-	Result    chan []fileDir.FileInfo
+	DirDataCh     chan fileDir.DirData
+	Result        chan []fileDir.FileInfo
+	ReadDir       func(dirname string) ([]iofs.DirEntry, error)
 }
 
 func (data *SearchData) CollectData(ctx context.Context) []fileDir.FileInfo {
@@ -128,7 +131,6 @@ func (data *SearchData) getCurrentDepth(dir string) int {
 	return data.DirToDepthMap[dir]
 }
 
-// Ограничить глубину поиска заданым числом
 func (data *SearchData) listDirectory(ctx context.Context, dir string, depth int) {
 	defer data.Wg.Done()
 	select {
@@ -143,7 +145,7 @@ func (data *SearchData) listDirectory(ctx context.Context, dir string, depth int
 		data.saveCurrentDir(dir, depth)
 		defer data.removeCurrentDir(dir)
 		depth++
-		res, err := os.ReadDir(dir)
+		res, err := data.ReadDir(dir)
 		if err != nil {
 			data.DirDataCh <- fileDir.DirData{
 				Files: nil,
@@ -167,6 +169,7 @@ func (data *SearchData) listDirectory(ctx context.Context, dir string, depth int
 					Files: result,
 					Err:   nil,
 				}
+				// Ограничить глубину поиска заданым числом
 			} else if entry.IsDir() && depth <= data.MaxDepth {
 				data.Wg.Add(1)
 				go func() {
