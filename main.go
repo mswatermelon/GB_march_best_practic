@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	collector "github.com/mswatermelon/GB_march_best_practic/data_collector"
-	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	collector "github.com/mswatermelon/GB_march_best_practic/data_collector"
+	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
 )
 
 func main() {

@@ -1,5 +1,7 @@
 package file_dir_info
 
+// Linter found: File is not `gofmt`-ed with `-s`
+
 import (
 	"os"
 )

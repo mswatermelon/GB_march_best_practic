@@ -1,9 +1,10 @@
 package data_collector
 
+// Linter found: File is not `goimports`-ed with -local github.com/mswatermelon/GB_march_best_practic
+
 import (
 	"context"
 	"fmt"
-	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
 	iofs "io/fs"
 	"log"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
 )
 
 type DataCollector interface {
