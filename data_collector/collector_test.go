@@ -2,11 +2,14 @@ package data_collector
 
 import (
 	"context"
-	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
-	"github.com/stretchr/testify/assert"
 	iofs "io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
+	"github.com/stretchr/testify/assert"
 )
 
 func createSearchData() SearchData {
@@ -178,11 +181,11 @@ func TestCollectData(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	res := searchData.CollectData(ctx)
-
+	wd, _ := os.Getwd()
 	checkSlice := []PathData{
 		{
 			name: "main.go",
-			path: "C:\\Users\\V.Aristarkhova\\GolandProjects\\GB_march_best_practic\\data_collector\\main.go",
+			path: filepath.Join(wd, "main.go"),
 		},
 	}
 	for i, f := range res {

@@ -4,11 +4,12 @@ package data_collector
 
 import (
 	"context"
-	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
 	"time"
+
+	fileDir "github.com/mswatermelon/GB_march_best_practic/file_dir_info"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCollectDataIntegration(t *testing.T) {
