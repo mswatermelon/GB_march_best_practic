@@ -1,0 +1,35 @@
+run:
+  concurrency: 4
+  timeout: 30s
+  issues-exit-code: 1
+  tests: false
+  skip-dirs-use-default: true
+
+linters:
+  disable-all: true
+  enable:
+    - gofmt
+    - goimports
+    - govet
+    - goconst
+    - gochecknoglobals
+    - funlen
+    - bodyclose
+    - dupl
+    - errcheck
+    - deadcode
+    - exportloopref
+    - nakedret
+    - prealloc
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/mswatermelon/GB_march_best_practic
+  govet:
+    check-shadowing: true
+  goconst:
+    min-len: 3
+    min-occurrences: 2
+  funlen:
+    lines: 100
+    statements: 30
